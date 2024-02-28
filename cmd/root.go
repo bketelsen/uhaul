@@ -16,10 +16,12 @@ limitations under the License.
 package cmd
 
 import (
+	"debug/elf"
 	"fmt"
 	"log/slog"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"strings"
 
@@ -83,6 +85,39 @@ func uhaulIt(cmd *cobra.Command, args []string) error {
 		bin = fullPath
 
 	}
+
+	interp, err := ldd.GetInterp(bin)
+	if err != nil {
+		return err
+	}
+	slog.Info("Interpreter", slog.String("interp", interp))
+	read_elf, err := elf.Open(path.Clean(bin))
+	if err != nil {
+		return err
+	}
+	defer read_elf.Close()
+	needed, err := read_elf.DynString(elf.DT_NEEDED)
+	if err != nil {
+		return err
+	}
+
+	fmt.Println("needed deps:")
+	for _, symbol := range needed {
+		fmt.Printf("%s\n", symbol) // search for the file in /lib/*
+	}
+	rtpath, err := read_elf.DynString(elf.DT_RUNPATH)
+	if err != nil {
+		return err
+	}
+
+	fmt.Printf("\nRUNPATH library paths:\n%v\n", rtpath)
+
+	runpath, err := read_elf.DynString(elf.DT_RPATH)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("\nRPATH library paths:\n%v\n", runpath)
+
 	binary, _ := d.AddVertex(bin)
 	err = deps(bin, binary, d)
 	if err != nil {
@@ -152,7 +187,7 @@ func uhaulIt(cmd *cobra.Command, args []string) error {
 	rpath := "$ORIGIN/../lib"
 	cmdStr := fmt.Sprintf("patchelf --set-rpath %s %s", rpath, binOut)
 	slog.Info("Setting RPATH", slog.String("cmd", cmdStr))
-	pcmd := exec.Command("patchelf", "--set-rpath", rpath, binOut)
+	pcmd := exec.Command("patchelf", "--set-rpath", rpath, "--set-interpreter", "/lib64/ld-linux-x86-64.so.2", binOut)
 	err = pcmd.Run()
 	if err != nil {
 		return err
@@ -183,6 +218,13 @@ func uhaulIt(cmd *cobra.Command, args []string) error {
 func deps(f string, vertex string, d *dag.DAG) error {
 	slog.Info("Traverse", slog.String("vertex", vertex))
 
+	flist, err := ldd.FList(f)
+	if err != nil {
+		return err
+	}
+	for _, y := range flist {
+		slog.Info("FList", slog.String("file", f), slog.String("dep", y))
+	}
 	lddDeps, err := ldd.List(f)
 	if err != nil {
 		return err
