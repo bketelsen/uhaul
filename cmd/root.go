@@ -249,7 +249,7 @@ func makeDirectories(p string) error {
 	return nil
 }
 
-// delete all the children of a directory
+// recursively deletes all files in a directory
 func cleanDirectory(p string) error {
 
 	files, err := os.ReadDir(p)
@@ -257,9 +257,16 @@ func cleanDirectory(p string) error {
 		return err
 	}
 	for _, f := range files {
-		err := os.RemoveAll(f.Name())
-		if err != nil {
-			return err
+		if f.IsDir() {
+			err = cleanDirectory(filepath.Join(p, f.Name()))
+			if err != nil {
+				return err
+			}
+		} else {
+			err = os.Remove(filepath.Join(p, f.Name()))
+			if err != nil {
+				return err
+			}
 		}
 	}
 	return nil
